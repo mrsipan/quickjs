@@ -2,6 +2,7 @@
 #include <time.h>
 
 #include "upstream-quickjs/quickjs.h"
+#include "upstream-quickjs/quickjs-libc.h"
 
 // Node of Python callable that the context needs to keep available.
 typedef struct PythonCallableNode PythonCallableNode;
@@ -470,7 +471,37 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// We never have different contexts for the same runtime. This way, different
 		// _quickjs.Context can be used concurrently.
 		self->runtime = JS_NewRuntime();
+
+		// Add these immediately after:
+		js_std_init_handlers(self->runtime);
+		JS_SetModuleLoaderFunc(self->runtime, NULL, js_module_loader, NULL);
+
+
 		self->context = JS_NewContext(self->runtime);
+
+
+		// Add these lines right after:
+                 js_init_module_std(self->context, "std");
+                 js_init_module_os(self->context, "os");
+                 js_std_add_helpers(self->context, 0, NULL); // Optional: adds print(), console.log()
+
+                 // Expose them to globalThis so you don't need ES6 imports in your Python eval() strings
+                 const char *setup_script =
+                     "import * as std from 'std';\n"
+                     "import * as os from 'os';\n"
+                     "globalThis.std = std;\n"
+                     "globalThis.os = os;\n";
+
+                 JSValue setup_val = JS_Eval(
+                     self->context,
+                     setup_script,
+                     strlen(setup_script),
+                     "<init>",
+                     JS_EVAL_TYPE_MODULE
+                 );
+                 JS_FreeValue(self->context, setup_val);
+
+
 		JS_NewClass(self->runtime, js_python_function_class_id,
 		            &js_python_function_class);
 		JSValue global = JS_GetGlobalObject(self->context);
@@ -491,8 +522,10 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
 // Deallocates an instance of the _quickjs.Context class.
 static void runtime_dealloc(RuntimeData *self) {
+
 	JS_FreeContext(self->context);
-	JS_FreeRuntime(self->runtime);
+        js_std_free_handlers(self->runtime);
+ 	JS_FreeRuntime(self->runtime);
 	PyObject_GC_UnTrack(self);
 	PyObject_GC_Del(self);
 }

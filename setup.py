@@ -2,7 +2,7 @@ import glob
 import sys
 from typing import List
 
-from setuptools import setup, Extension
+from setuptools import Extension, setup
 
 CONFIG_VERSION = open("upstream-quickjs/VERSION").read().strip()
 extra_link_args: List[str] = []
@@ -16,7 +16,7 @@ if sys.platform == "win32":
     #    system PATH when compiling.
     # 3. The code below will moneky-patch distutils to work.
     import distutils.cygwinccompiler
-    distutils.cygwinccompiler.get_msvcr = lambda: [] 
+    distutils.cygwinccompiler.get_msvcr = lambda: []
     # Make sure that pthreads is linked statically, otherwise we run into problems
     # on computers where it is not installed.
     extra_link_args = ["-static"]
@@ -25,12 +25,13 @@ if sys.platform == "win32":
 def get_c_sources(include_headers=False):
     sources = [
         "module.c",
+        "upstream-quickjs/quickjs-libc.c",
         "upstream-quickjs/cutils.c",
         "upstream-quickjs/libbf.c",
         "upstream-quickjs/libregexp.c",
         "upstream-quickjs/libunicode.c",
         "upstream-quickjs/quickjs.c",
-    ]
+        ]
     if include_headers:
         sources += [
             "upstream-quickjs/cutils.h",
@@ -44,18 +45,22 @@ def get_c_sources(include_headers=False):
             "upstream-quickjs/quickjs-opcode.h",
             "upstream-quickjs/quickjs.h",
             "upstream-quickjs/VERSION",
-        ]
+            ]
     return sources
 
 
 _quickjs = Extension(
     '_quickjs',
-    define_macros=[('CONFIG_VERSION', f'"{CONFIG_VERSION}"'), ('CONFIG_BIGNUM', None)],
+    define_macros=[
+        ('CONFIG_VERSION', f'"{CONFIG_VERSION}"'),
+        ('CONFIG_BIGNUM', None)
+        ],
     # HACK.
     # See https://github.com/pypa/packaging-problems/issues/84.
     sources=get_c_sources(include_headers=("sdist" in sys.argv)),
     extra_compile_args=["-Werror=incompatible-pointer-types"],
-    extra_link_args=extra_link_args)
+    extra_link_args=extra_link_args
+    )
 
 long_description = """
 Python wrapper around https://bellard.org/quickjs/ .
@@ -67,15 +72,17 @@ QuickJS is currently thread-hostile, so this wrapper makes sure that all calls
 to the same JS runtime comes from the same thead.
 """
 
-setup(author="Petter Strandmark",
-      author_email="petter.strandmark@gmail.com",
-      maintainer="Quentin Wenger",
-      maintainer_email="matpi@protonmail.ch",
-      name='quickjs',
-      url='https://github.com/PetterS/quickjs',
-      version='1.19.4',
-      license="MIT",
-      description='Wrapping the quickjs C library.',
-      long_description=long_description,
-      packages=["quickjs"],
-      ext_modules=[_quickjs])
+setup(
+    author="Petter Strandmark",
+    author_email="petter.strandmark@gmail.com",
+    maintainer="Quentin Wenger",
+    maintainer_email="matpi@protonmail.ch",
+    name='quickjs_std',
+    url='https://github.com/PetterS/quickjs',
+    version='1.19.4',
+    license="MIT",
+    description='Wrapping the quickjs C library.',
+    long_description=long_description,
+    packages=["quickjs"],
+    ext_modules=[_quickjs]
+    )
