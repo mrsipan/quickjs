@@ -83,6 +83,6 @@ setup(
     license="MIT",
     description='Wrapping the quickjs C library.',
     long_description=long_description,
-    packages=["quickjs"],
+    packages=["quickjs_std"],
     ext_modules=[_quickjs]
     )

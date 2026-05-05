@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "quickjs"
+name = "quickjs_std"
 version = "0"  # Version in setup.py is used for distributing.
 description = "Python wrapper around https://bellard.org/quickjs/"
 authors = ["Petter Strandmark"]
