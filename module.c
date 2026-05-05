@@ -471,6 +471,8 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// We never have different contexts for the same runtime. This way, different
 		// _quickjs.Context can be used concurrently.
 		self->runtime = JS_NewRuntime();
+		// Add this immediately after it:
+                // JS_SetMaxStackSize(self->runtime, 32 * 1024 * 1024); // Increase C-stack to 8MB
 
 		// Add these immediately after:
 		js_std_init_handlers(self->runtime);
