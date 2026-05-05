@@ -5,12 +5,7 @@
 #include "upstream-quickjs/quickjs-libc.h"
 
 // Node of Python callable that the context needs to keep available.
-typedef struct PythonCallableNode PythonCallableNode;
-struct PythonCallableNode {
-	PyObject *obj;
-	PythonCallableNode *prev;
-	PythonCallableNode *next;
-};
+typedef struct PythonCallableNode PythonCallableNode;   // forward declaration
 
 // Keeps track of the time if we are using a time limit.
 typedef struct {
@@ -18,7 +13,7 @@ typedef struct {
 	clock_t limit;
 } InterruptData;
 
-// The data of the type _quickjs.Context.
+
 typedef struct {
 	PyObject_HEAD JSRuntime *runtime;
 	JSContext *context;
@@ -33,6 +28,15 @@ typedef struct {
 	// cycle across Python and QuickJS that neither GC can notice.
 	PythonCallableNode *python_callables;
 } RuntimeData;
+// The data of the type _quickjs.Context.
+typedef struct PythonCallableNode PythonCallableNode;
+struct PythonCallableNode {
+	PyObject *obj;
+	RuntimeData *runtime_data;
+	PythonCallableNode *prev;
+	PythonCallableNode *next;
+};
+
 
 // The data of the type _quickjs.Object.
 typedef struct {
@@ -369,20 +373,35 @@ static int runtime_traverse(RuntimeData *self, visitproc visit, void *arg) {
 
 // GC clearing. Object does not have a clearing method, therefore dependency cycles
 // between Context and Object will always be cleared starting here.
+/* static int runtime_clear(RuntimeData *self) { */
+/* 	PythonCallableNode *node = self->python_callables; */
+/* 	while (node) { */
+/* 		Py_CLEAR(node->obj); */
+/* 		node = node->next; */
+/* 	} */
+/* 	return 0; */
+/* } */
+
 static int runtime_clear(RuntimeData *self) {
-	PythonCallableNode *node = self->python_callables;
-	while (node) {
-		Py_CLEAR(node->obj);
-		node = node->next;
-	}
-	return 0;
+    PyObject *keep = (PyObject *)self;
+    Py_INCREF(keep);   // protect self from deletion
+
+    PythonCallableNode *node = self->python_callables;
+    while (node) {
+        PythonCallableNode *next = node->next;   // save before clearing
+        Py_CLEAR(node->obj);
+        node = next;
+    }
+
+    Py_DECREF(keep);
+    return 0;
 }
 
 static JSClassID js_python_function_class_id;
 
 static void js_python_function_finalizer(JSRuntime *rt, JSValue val) {
 	PythonCallableNode *node = JS_GetOpaque(val, js_python_function_class_id);
-	RuntimeData *runtime_data = JS_GetRuntimeOpaque(rt);
+	RuntimeData *runtime_data = node->runtime_data;
 	if (node) {
 		// fail safe
 		JS_SetOpaque(val, NULL);
@@ -412,8 +431,8 @@ static void js_python_function_finalizer(JSRuntime *rt, JSValue val) {
 static JSValue js_python_function_call(JSContext *ctx, JSValueConst func_obj,
                                        JSValueConst this_val, int argc, JSValueConst *argv,
                                        int flags) {
-	RuntimeData *runtime_data = (RuntimeData *)JS_GetRuntimeOpaque(JS_GetRuntime(ctx));
 	PythonCallableNode *node = JS_GetOpaque(func_obj, js_python_function_class_id);
+	RuntimeData *runtime_data = node->runtime_data;
 	if (runtime_data->has_time_limit) {
 		return JS_ThrowInternalError(ctx, "Can not call into Python with a time limit set.");
 	}
@@ -472,7 +491,7 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// _quickjs.Context can be used concurrently.
 		self->runtime = JS_NewRuntime();
 		// Add this immediately after it:
-                // JS_SetMaxStackSize(self->runtime, 32 * 1024 * 1024); // Increase C-stack to 8MB
+                // JS_SetMaxStackSize(self->runtime, 64 * 1024 * 1024); // Increase C-stack to 8MB
 
 		// Add these immediately after:
 		js_std_init_handlers(self->runtime);
@@ -485,7 +504,7 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// Add these lines right after:
                  js_init_module_std(self->context, "std");
                  js_init_module_os(self->context, "os");
-                 js_std_add_helpers(self->context, 0, NULL); // Optional: adds print(), console.log()
+                 // js_std_add_helpers(self->context, 0, NULL); // Optional: adds print(), console.log()
 
                  // Expose them to globalThis so you don't need ES6 imports in your Python eval() strings
                  const char *setup_script =
@@ -501,6 +520,17 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
                      "<init>",
                      JS_EVAL_TYPE_MODULE
                  );
+
+                 if (JS_IsException(setup_val)) {
+                     quickjs_exception_to_python(self->context);
+                     JS_FreeValue(self->context, setup_val);
+                     js_std_free_handlers(self->runtime);
+                     JS_FreeContext(self->context);
+                     JS_FreeRuntime(self->runtime);
+                     PyObject_GC_Del(self);
+                     return NULL;
+                 }
+
                  JS_FreeValue(self->context, setup_val);
 
 
@@ -516,7 +546,7 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		self->time_limit = 0;
 		self->thread_state = NULL;
 		self->python_callables = NULL;
-		JS_SetRuntimeOpaque(self->runtime, self);
+		// JS_SetRuntimeOpaque(self->runtime, self);
 		PyObject_GC_Track(self);
 	}
 	return (PyObject *)self;
@@ -525,10 +555,10 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 // Deallocates an instance of the _quickjs.Context class.
 static void runtime_dealloc(RuntimeData *self) {
 
-	JS_FreeContext(self->context);
-        js_std_free_handlers(self->runtime);
- 	JS_FreeRuntime(self->runtime);
 	PyObject_GC_UnTrack(self);
+        js_std_free_handlers(self->runtime);
+	JS_FreeContext(self->context);
+ 	JS_FreeRuntime(self->runtime);
 	PyObject_GC_Del(self);
 }
 
@@ -754,8 +784,9 @@ static PyObject *runtime_add_callable(RuntimeData *self, PyObject *args) {
 		JS_FreeValue(self->context, function);
 		return NULL;
 	}
-	Py_INCREF(callable);
 	node->obj = callable;
+	node->runtime_data = self;
+	Py_INCREF(callable);
 	node->prev = NULL;
 	node->next = self->python_callables;
 	if (self->python_callables) {
