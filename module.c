@@ -491,7 +491,7 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// _quickjs.Context can be used concurrently.
 		self->runtime = JS_NewRuntime();
 		// Add this immediately after it:
-                // JS_SetMaxStackSize(self->runtime, 64 * 1024 * 1024); // Increase C-stack to 8MB
+                JS_SetMaxStackSize(self->runtime, 64 * 1024 * 1024); // Increase C-stack
 
 		// Add these immediately after:
 		js_std_init_handlers(self->runtime);
@@ -504,7 +504,7 @@ static PyObject *runtime_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		// Add these lines right after:
                  js_init_module_std(self->context, "std");
                  js_init_module_os(self->context, "os");
-                 // js_std_add_helpers(self->context, 0, NULL); // Optional: adds print(), console.log()
+                 js_std_add_helpers(self->context, 0, NULL); // Optional: adds print(), console.log()
 
                  // Expose them to globalThis so you don't need ES6 imports in your Python eval() strings
                  const char *setup_script =
